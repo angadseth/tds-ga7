@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 
 API = "https://api.github.com"
@@ -160,3 +161,38 @@ def status_for(email):
     if "failing" in svg:
         return "failing"
     return "no status"
+
+
+# --- reading a student's saved score ----------------------------------------
+#
+# The exam's own page reads this endpoint, and it needs no authentication — but
+# it sends no CORS header, so a browser on another origin cannot. Proxying it
+# here lets the solver show a live score without asking anyone for a session
+# token it has no business holding.
+
+EXAM = "https://exam.sanand.workers.dev"
+
+
+def saved_score(email, quiz="tds-2026-05-ga7"):
+    url = (
+        f"{EXAM}/filter?quiz={urllib.parse.quote(quiz)}"
+        f"&email={urllib.parse.quote(email)}&history=1&limit=1&positives=1"
+    )
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=25) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as error:
+        return {"error": f"Could not read the exam's score endpoint: {error}"}
+
+    rows = payload.get("data") or []
+    if not rows:
+        return {"saved": False}
+    row = rows[0]
+    return {
+        "saved": True,
+        "total": row.get("total"),
+        "max": row.get("max"),
+        "scores": row.get("scores") or {},
+        "time": row.get("time"),
+    }

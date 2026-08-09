@@ -109,6 +109,14 @@ class Handler(BaseHTTPRequestHandler):
                 payload["assigned"] = _describe(email)
             return self._send(payload)
 
+        if endpoint == "/score":
+            query = parse_qs(urlparse(self.path).query)
+            who = email or (query.get("email") or [None])[0]
+            if not who:
+                return self._send({"error": "pass ?email=… or use a /s/<token>/ URL"}, 400)
+            quiz = (query.get("quiz") or ["tds-2026-05-ga7"])[0]
+            return self._send(workflow.saved_score(who, quiz))
+
         if endpoint == "/workflow":
             query = parse_qs(urlparse(self.path).query)
             who = email or (query.get("email") or [None])[0]

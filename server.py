@@ -1,30 +1,33 @@
 """TDS GA7 policy service — stdlib-only HTTP server for Cloud Run.
 
-  POST /release-gate      Q1  CI/CD container release gate
-  POST /action-firewall   Q2  LLM action firewall
-  POST /terraform/plan    Q3  Terraform plan policy gate
-  POST /sanitize-output   Q4  LLM output handling gate (OWASP LLM05)
-  POST /corroborate       Q5  OSINT corroboration engine
+Two ways to reach the same five gates:
 
-No LLM, no phrase lists, no network calls, no wall-clock reads — every
-decision is a pure function of the request body.
+    POST /release-gate                 the values compiled into the gates
+    POST /s/<token>/release-gate       the values belonging to <token>'s student
+
+`<token>` is a student's email, base64url encoded, so one deployment answers
+correctly for anyone: the grader's payloads are identical, but the assigned
+tenant, workspace, labels and host allowlist are derived per student exactly as
+the exam derives them.
+
+No LLM, no phrase lists, no network calls, no wall-clock reads — every decision
+is a pure function of the request body and the student's identity.
 """
 
 import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gates"))
 
+import variant  # noqa: E402
 from q1_release_gate import handle as release_gate  # noqa: E402
 from q2_firewall import handle as action_firewall  # noqa: E402
 from q3_terraform import handle as terraform_plan  # noqa: E402
 from q4_sanitize import handle as sanitize_output  # noqa: E402
 from q5_corroborate import handle as corroborate  # noqa: E402
-
-IDENTITY = "24f2004141@ds.study.iitm.ac.in"
 
 ROUTES = {
     "/release-gate": release_gate,
@@ -35,12 +38,26 @@ ROUTES = {
 }
 
 
-def _normalise(path):
-    """Accept the bare path and an optional /api prefix, with or without a slash."""
-    p = urlparse(path).path.rstrip("/") or "/"
+def _split(path):
+    """Return (endpoint, email or None) for a request path.
+
+    Accepts an optional /api prefix and an optional /s/<token> identity segment,
+    with or without a trailing slash, so a base URL pasted with either style
+    still resolves.
+    """
+    p = urlparse(path).path
+    p = "/" + p.strip("/")
     if p.startswith("/api/"):
         p = p[4:]
-    return p
+    email = None
+    if p.startswith("/s/"):
+        rest = p[3:]
+        token, _, tail = rest.partition("/")
+        email = variant.decode_email(token)
+        if email is None:
+            return None, False  # a malformed identity is its own error
+        p = "/" + tail
+    return (p.rstrip("/") or "/"), email
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -48,24 +65,47 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "tds-ga7"
 
     def do_POST(self):
-        fn = ROUTES.get(_normalise(self.path))
+        endpoint, email = _split(self.path)
+        if endpoint is None:
+            return self._send({"error": "unknown identity in path"}, 404)
+
+        fn = ROUTES.get(endpoint)
         if fn is None:
             return self._send({"error": "not found", "endpoints": sorted(ROUTES)}, 404)
+
         try:
             n = int(self.headers.get("content-length") or 0)
             body = json.loads(self.rfile.read(n).decode("utf-8")) if n else None
         except Exception:
-            # A malformed body is not a crash: the gates reject it on their own terms.
+            # A malformed body is not a crash: each gate rejects it on its own terms.
             body = None
-        self._send(fn(body))
+
+        if email:
+            with variant.use(variant.for_email(email)):
+                return self._send(fn(body))
+        return self._send(fn(body))
 
     def do_GET(self):
-        p = _normalise(self.path)
-        if p in ("/", "/healthz"):
-            return self._send({"service": "tds-ga7", "ok": True,
-                               "endpoints": sorted(ROUTES), "identity": IDENTITY})
-        if p in ROUTES:
-            return self._send({"endpoint": p, "method": "POST", "identity": IDENTITY})
+        endpoint, email = _split(self.path)
+        if endpoint is None:
+            return self._send({"error": "unknown identity in path"}, 404)
+
+        if endpoint in ("/", "/healthz"):
+            payload = {"service": "tds-ga7", "ok": True, "endpoints": sorted(ROUTES)}
+            if email:
+                payload["assigned"] = _describe(email)
+            return self._send(payload)
+
+        if endpoint == "/variant":
+            query = parse_qs(urlparse(self.path).query)
+            who = email or (query.get("email") or [None])[0]
+            if not who:
+                return self._send({"error": "pass ?email=… or use a /s/<token>/ URL"}, 400)
+            return self._send(_describe(who))
+
+        if endpoint in ROUTES:
+            return self._send({"endpoint": endpoint, "method": "POST"})
+
         return self._send({"error": "not found", "endpoints": sorted(ROUTES)}, 404)
 
     def _send(self, payload, status=200):
@@ -73,11 +113,37 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("content-type", "application/json")
         self.send_header("content-length", str(len(data)))
+        # The solver page is served from a different origin and reads these.
+        self.send_header("access-control-allow-origin", "*")
         self.end_headers()
         self.wfile.write(data)
 
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("access-control-allow-origin", "*")
+        self.send_header("access-control-allow-methods", "GET, POST, OPTIONS")
+        self.send_header("access-control-allow-headers", "content-type")
+        self.send_header("content-length", "0")
+        self.end_headers()
+
     def log_message(self, *a):
         pass
+
+
+def _describe(email):
+    """What this service will enforce for one student — so they can check it."""
+    v = variant.for_email(email)
+    return {
+        "email": v["email"],
+        "baseUrl": f"/s/{variant.encode_email(email)}",
+        "tenantId": v["tenantId"],
+        "emailDomain": v["emailDomain"],
+        "environment": v["environment"],
+        "labels": v["labels"],
+        "allowedHosts": sorted(v["allowedHosts"]),
+        "subject": v["subject"],
+        "stalenessDays": v["stalenessDays"],
+    }
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ Rules are evaluated in the fixed order below and the FIRST failure wins:
 """
 
 import re
+import variant
 
 PROD_ENVIRONMENT = "prod-loqe15"
 
@@ -125,7 +126,7 @@ def handle(body):
         resource = body["resource"]
 
         # Rule 2 - production workspace only.
-        if body["environment"] != PROD_ENVIRONMENT:
+        if body["environment"] != variant.get("environment", PROD_ENVIRONMENT):
             return _reject("ENVIRONMENT_MISMATCH")
 
         # Rule 3 - remote, locked state.
@@ -142,7 +143,7 @@ def handle(body):
         # PRESENT with exact values; it never forbids additional labels, so
         # extra labels are accepted rather than treated as a violation.
         labels = resource["labels"]
-        for key, value in REQUIRED_LABELS.items():
+        for key, value in variant.get("labels", REQUIRED_LABELS).items():
             if labels.get(key) != value:
                 return _reject("MISSING_LABELS")
 

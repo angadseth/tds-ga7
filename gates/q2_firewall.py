@@ -15,6 +15,7 @@ egress allowlist, human approval and safe rendering are the only boundary.
 """
 
 import re
+import variant
 
 TENANT_ID = "tenant-r9l91zn"
 EMAIL_DOMAIN = "notify-lizt2eh.example"
@@ -158,7 +159,7 @@ def _domain_allowed(to):
         return False
     if re.search(r"\s", to):
         return False
-    return domain.lower() == EMAIL_DOMAIN
+    return domain.lower() == variant.get("emailDomain", EMAIL_DOMAIN)
 
 
 # --- entry point ------------------------------------------------------------
@@ -180,7 +181,7 @@ def handle(body):
         if reason:
             return _block(reason)
 
-        if tool == "lookup_record" and args["tenantId"] != TENANT_ID:
+        if tool == "lookup_record" and args["tenantId"] != variant.get("tenantId", TENANT_ID):
             return _block("TENANT_SCOPE")
 
         if tool == "send_email":

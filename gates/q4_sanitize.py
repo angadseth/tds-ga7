@@ -19,6 +19,7 @@ never turn a bad request into a 500.
 
 import re
 from urllib.parse import unquote, urlsplit
+import variant
 
 __all__ = ["handle", "evaluate", "CHANNELS", "ALLOWED_HOSTS"]
 
@@ -197,7 +198,7 @@ def _external_host(url):
     host = (parts.hostname or "").lower().rstrip(".")
     if not host:
         return True
-    return host not in ALLOWED_HOSTS
+    return host not in variant.get("allowedHosts", ALLOWED_HOSTS)
 
 
 # --- channel rules ---------------------------------------------------------

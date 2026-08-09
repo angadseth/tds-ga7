@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gates"))
 
 import variant  # noqa: E402
+import workflow  # noqa: E402
 from q1_release_gate import handle as release_gate  # noqa: E402
 from q2_firewall import handle as action_firewall  # noqa: E402
 from q3_terraform import handle as terraform_plan  # noqa: E402
@@ -69,6 +70,18 @@ class Handler(BaseHTTPRequestHandler):
         if endpoint is None:
             return self._send({"error": "unknown identity in path"}, 404)
 
+        if endpoint == "/workflow":
+            # Creating question one's evidence: the one thing a student cannot
+            # share, made a single request instead of a repository to build.
+            if not email:
+                return self._send({"error": "use your /s/<token>/workflow URL"}, 400)
+            try:
+                result = workflow.ensure(email)
+            except workflow.WorkflowError as error:
+                return self._send({"error": str(error)}, 503)
+            result["status"] = workflow.status_for(email)
+            return self._send(result)
+
         fn = ROUTES.get(endpoint)
         if fn is None:
             return self._send({"error": "not found", "endpoints": sorted(ROUTES)}, 404)
@@ -95,6 +108,16 @@ class Handler(BaseHTTPRequestHandler):
             if email:
                 payload["assigned"] = _describe(email)
             return self._send(payload)
+
+        if endpoint == "/workflow":
+            query = parse_qs(urlparse(self.path).query)
+            who = email or (query.get("email") or [None])[0]
+            if not who:
+                return self._send({"error": "pass ?email=… or use a /s/<token>/ URL"}, 400)
+            return self._send({
+                "workflowUrl": workflow.workflow_url(who),
+                "status": workflow.status_for(who),
+            })
 
         if endpoint == "/variant":
             query = parse_qs(urlparse(self.path).query)

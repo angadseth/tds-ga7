@@ -28,11 +28,11 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Test the release-gate implementation
-        run: python api/gates/test_q1.py
+        run: python gates/test_q1.py
 
       - name: Test the other policy gates
         run: |
-          python api/gates/test_q2.py
-          python api/gates/test_q3.py
-          python api/gates/test_q4.py
-          python api/gates/test_q5.py
+          python gates/test_q2.py
+          python gates/test_q3.py
+          python gates/test_q4.py
+          python gates/test_q5.py

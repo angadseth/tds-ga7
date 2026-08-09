@@ -5,8 +5,5 @@
     { "source": "/terraform/plan", "destination": "/api/terraform/plan" },
     { "source": "/sanitize-output", "destination": "/api/sanitize-output" },
     { "source": "/corroborate", "destination": "/api/corroborate" }
-  ],
-  "functions": {
-    "api/**/*.py": { "includeFiles": "api/gates/**" }
-  }
+  ]
 }

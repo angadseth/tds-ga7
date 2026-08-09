@@ -1,5 +1,12 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
-  ]
+    { "source": "/release-gate", "destination": "/api/release-gate" },
+    { "source": "/action-firewall", "destination": "/api/action-firewall" },
+    { "source": "/terraform/plan", "destination": "/api/terraform/plan" },
+    { "source": "/sanitize-output", "destination": "/api/sanitize-output" },
+    { "source": "/corroborate", "destination": "/api/corroborate" }
+  ],
+  "functions": {
+    "api/**/*.py": { "includeFiles": "api/gates/**" }
+  }
 }
